@@ -4,6 +4,7 @@
 #include <iostream>
 #include <fstream>
 #include <iomanip>
+#include <filesystem>
 
 // Costruttore aggiornato con inizializzazione di piece_length e total_size
 PieceManager::PieceManager(size_t numPieces, uint32_t pLen, long long totalSize) 
@@ -94,55 +95,45 @@ std::shared_mutex& PieceManager::getMutex() {
     return rw_mutex; 
 }
 
-
 bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* blockData, size_t blockSize) {
-    std::unique_lock<std::shared_mutex> lock(rw_mutex); // Uso del tuo mutex esistente
+    std::unique_lock<std::shared_mutex> lock(rw_mutex); 
 
-    // 1. Se il pezzo è già completo nel bitfield, ignoriamo il blocco
+    // 1. Controllo bitfield (già corretto nel tuo codice)
     size_t byteIdx = index / 8;
     if (byteIdx < global_bitfield.size()) {
-        if (global_bitfield[byteIdx] & (1 << (7 - (index % 8)))) {
-            return false; 
-        }
+        if (global_bitfield[byteIdx] & (1 << (7 - (index % 8)))) return false; 
     }
 
-    // 2. Inizializzazione del buffer se è il primo blocco del pezzo
+    // 2. Inizializzazione buffer (già corretto)
     if (in_progress.find(index) == in_progress.end()) {
         uint32_t current_p_len = piece_length;
-        
-        // Calcolo per l'ultimo pezzo (potrebbe essere più corto)
         long long numPieces = (total_size + piece_length - 1) / piece_length;
         if (index == numPieces - 1) {
             current_p_len = total_size - (index * (long long)piece_length);
         }
-
         in_progress[index].buffer.resize(current_p_len);
         in_progress[index].bytes_received = 0;
     }
 
-    // 3. Copia dei dati nel buffer
+    // 3. Copia dati
     PieceProgress& p = in_progress[index];
     if (begin + blockSize <= p.buffer.size()) {
         std::copy(blockData, blockData + blockSize, p.buffer.begin() + begin);
         p.bytes_received += blockSize;
     }
 
-    // 4. Se il pezzo è completo, verifica l'Hash
+    // 4. Verifica Hash
     if (p.bytes_received >= p.buffer.size()) {
         sha1 hasher;
         hasher.add(p.buffer.data(), p.buffer.size());
-        hasher.finalize(); //
+        hasher.finalize();
         
         char calculated_hex[41];
-        hasher.print_hex(calculated_hex); // Otteniamo l'hash in formato hex
+        hasher.print_hex(calculated_hex);
 
-        // Estrazione hash atteso dalla stringa binaria pieces_hashes
-        // Ogni hash binario è di 20 byte. Lo convertiamo in hex per il confronto.
         std::string expected_bin = pieces_hashes.substr(index * 20, 20);
         std::stringstream ss;
-        for(unsigned char c : expected_bin) {
-            ss << std::hex << std::setw(2) << std::setfill('0') << (int)c;
-        }
+        for(unsigned char c : expected_bin) ss << std::hex << std::setw(2) << std::setfill('0') << (int)c;
         std::string expected_hex = ss.str();
 
         if (std::string(calculated_hex) == expected_hex) {
@@ -150,49 +141,54 @@ bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* block
             
             saveToDisk(index, p.buffer);
 
-            markAsComplete(index); 
+            // --- FISSA QUI: Aggiorna il bitfield direttamente senza chiamare markAsComplete ---
+            if (byteIdx < global_bitfield.size()) {
+                global_bitfield[byteIdx] |= (1 << (7 - (index % 8)));
+            }
+            
             in_progress.erase(index);
             return true;
         } else {
             std::cout << "[FAIL] Pezzo #" << index << " corrotto! Hash errato." << std::endl;
-            in_progress.erase(index); // Scartiamo i dati
+            in_progress.erase(index);
             return false;
         }
     }
-
     return false;
 }
 
 void PieceManager::saveToDisk(uint32_t index, const std::vector<uint8_t>& data) {
-    // Calcolo dell'offset assoluto: indice del pezzo moltiplicato per la sua lunghezza standard
-    // Usiamo long long per evitare overflow su file grandi (> 2GB)
-    long long absoluteOffset = (long long)index * piece_length;
+    long long pieceGlobalOffset = (long long)index * piece_length;
+    long long currentFileStart = 0;
+    size_t dataOffset = 0;
+    long long bytesRemaining = data.size();
 
-    // Apriamo il file in modalità binaria. 
-    // "std::ios::in" è necessario insieme a "out" per evitare che il file venga troncato a ogni apertura.
-    std::fstream out(download_filename, std::ios::in | std::ios::out | std::ios::binary);
+    for (const auto& file : filesList) {
+        long long currentFileEnd = currentFileStart + file.length;
+        if (pieceGlobalOffset < currentFileEnd && (pieceGlobalOffset + bytesRemaining) > currentFileStart) {
+            long long writeOffset = std::max(0LL, pieceGlobalOffset - currentFileStart);
+            long long bytesToWrite = std::min(bytesRemaining, file.length - writeOffset);
 
-    // Se il file non esiste ancora, lo creiamo e pre-allochiamo lo spazio totale
-    if (!out.is_open()) {
-        std::cout << "[Disk] Creazione file: " << download_filename << std::endl;
-        std::ofstream create_file(download_filename, std::ios::binary);
-        // Posizioniamoci alla fine del file per riservare lo spazio (total_size)
-        create_file.seekp(total_size - 1);
-        create_file.write("\0", 1);
-        create_file.close();
-        
-        // Riapriamo il file correttamente
-        out.open(download_filename, std::ios::in | std::ios::out | std::ios::binary);
-    }
+            std::filesystem::path p(file.path);
+            if (p.has_parent_path()) std::filesystem::create_directories(p.parent_path());
 
-    if (out.is_open()) {
-        // Ci posizioniamo all'offset calcolato
-        out.seekp(absoluteOffset);
-        // Scriviamo l'intero pezzo
-        out.write(reinterpret_cast<const char*>(data.data()), data.size());
-        out.close();
-        // std::cout << "[Disk] Scritto pezzo #" << index << " all'offset " << absoluteOffset << std::endl;
-    } else {
-        std::cerr << "[Error] Impossibile accedere al disco per scrivere il pezzo #" << index << std::endl;
+            std::fstream fs(file.path, std::ios::in | std::ios::out | std::ios::binary);
+            if (!fs.is_open()) {
+                std::ofstream create(file.path, std::ios::binary);
+                create.seekp(file.length - 1);
+                create.write("\0", 1);
+                create.close();
+                fs.open(file.path, std::ios::in | std::ios::out | std::ios::binary);
+            }
+            fs.seekp(writeOffset);
+            fs.write(reinterpret_cast<const char*>(&data[dataOffset]), bytesToWrite);
+            fs.close();
+
+            dataOffset += bytesToWrite;
+            bytesRemaining -= bytesToWrite;
+            pieceGlobalOffset += bytesToWrite; 
+        }
+        currentFileStart += file.length;
+        if (bytesRemaining <= 0) break;
     }
 }

@@ -278,3 +278,42 @@ long long TorrentFile::getPieceLength() const {
 
     return 0;
 }
+
+
+std::vector<FileInfo> TorrentFile::getFilesList() const {
+    std::vector<FileInfo> files;
+    if (!root) return files;
+    Bnode* infoNode = nullptr;
+    for (const auto& pair : root->dict_val) {
+        if (pair.first == "info") { infoNode = pair.second; break; }
+    }
+    if (!infoNode) return files;
+
+    std::string rootName = "";
+    for (const auto& p : infoNode->dict_val) if (p.first == "name") rootName = p.second->str_val;
+
+    // Caso File Singolo
+    for (const auto& p : infoNode->dict_val) {
+        if (p.first == "length") {
+            files.push_back({rootName, p.second->int_val});
+            return files;
+        }
+    }
+    // Caso Multi-File
+    for (const auto& p : infoNode->dict_val) {
+        if (p.first == "files") {
+            for (Bnode* fileDict : p.second->list_val) {
+                long long len = 0;
+                std::string fullPath = rootName;
+                for (const auto& fPair : fileDict->dict_val) {
+                    if (fPair.first == "length") len = fPair.second->int_val;
+                    else if (fPair.first == "path") {
+                        for (Bnode* part : fPair.second->list_val) fullPath += "/" + part->str_val;
+                    }
+                }
+                files.push_back({fullPath, len});
+            }
+        }
+    }
+    return files;
+}

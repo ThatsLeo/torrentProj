@@ -8,15 +8,18 @@
 #include <map>
 #include <string>
 #include <fstream>
+#include "../parser/TorrentFile.hpp"
+
 
 class PieceManager {
 public:
-    // Campi pubblici per permettere l'accesso diretto (come richiesto per il main)
+    
     std::vector<uint8_t> global_bitfield;
     mutable std::shared_mutex rw_mutex;
     uint32_t piece_length;
     long long total_size; 
     std::string download_filename = "output_file.dat";
+    std::vector<FileInfo> filesList;
 
     // Costruttore
     PieceManager(size_t numPieces, uint32_t pLen, long long totalSize);
@@ -39,6 +42,7 @@ public:
     }
 
     void saveToDisk(uint32_t index, const std::vector<uint8_t>& data);
+    void setFilesList(const std::vector<FileInfo>& files) { this->filesList = files; }
 
     // Getter
     std::vector<uint8_t>& getBitfield();

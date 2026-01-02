@@ -6,6 +6,11 @@
 #include <vector>
 #include <string>
 
+struct FileInfo {
+    std::string path;
+    long long length;
+};
+
 class TorrentFile {
 public:
     TorrentFile();
@@ -22,6 +27,8 @@ public:
     long long getPieceLength() const;
 
     std::string getPiecesHash() const;
+
+    std::vector<FileInfo> getFilesList() const;
 
     void printStructure() const;
 

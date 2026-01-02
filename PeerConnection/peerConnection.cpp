@@ -108,7 +108,7 @@ bool PeerConnection::receiveHandshake(const std::string& expectedHash) {
         return false;
     }
 
-    std::cout << "Handshake completato con successo con " << ip << std::endl;
+    //std::cout << "Handshake completato con successo con " << ip << std::endl;
     return true;
 }
 
@@ -151,13 +151,13 @@ PeerConnection::BTMessage PeerConnection::readMessage() {
 void PeerConnection::handleMessage(const BTMessage& msg) {
     switch (msg.id) {
         case 0: // CHOKE
-            std::cout << "[Msg] CHOKE: Il peer " << ip << " ci ha bloccati (normale)." << std::endl;
+            //std::cout << "[Msg] CHOKE: Il peer " << ip << " ci ha bloccati (normale)." << std::endl;
             peer_choking = true;
             break;
         
         case 1: // UNCHOKE
             this->peer_choking = false;
-            std::cout << "[Msg] UNCHOKE da " << ip << ". Scelgo un pezzo..." << std::endl;
+            //std::cout << "[Msg] UNCHOKE da " << ip << ". Scelgo un pezzo..." << std::endl;
             
             {
                 // Chiediamo al manager quale pezzo scaricare da questo peer
@@ -167,21 +167,24 @@ void PeerConnection::handleMessage(const BTMessage& msg) {
                     // Chiediamo il primo blocco (16KB) del pezzo scelto
                     this->sendRequest(pieceToRequest, 0, 16384);
                 } else {
-                    std::cout << "[Info] Il peer " << ip << " non ha pezzi che mi mancano." << std::endl;
+                    //std::cout << "[Info] Il peer " << ip << " non ha pezzi che mi mancano." << std::endl;
                 }
             }
             break;
 
         case 4: // HAVE
-            std::cout << "[Msg] HAVE: Il peer ha un nuovo pezzo." << std::endl;
-            // ... logica bitfield ...
-            if (!this->am_interested && am_Interested()) {
-                sendInterested();
+            if (msg.payload.size() == 4) {
+            uint32_t index = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data()));
+            size_t byteIdx = index / 8;
+            if (byteIdx < peer_bitfield.size()) {
+                peer_bitfield[byteIdx] |= (1 << (7 - (index % 8)));
+            }
+            if (!this->am_interested && am_Interested()) sendInterested();
             }
             break;
 
         case 5: // BITFIELD
-            std::cout << "[Msg] BITFIELD ricevuto da " << ip << " (" << msg.payload.size() << " bytes)" << std::endl;
+            //std::cout << "[Msg] BITFIELD ricevuto da " << ip << " (" << msg.payload.size() << " bytes)" << std::endl;
             this->peer_bitfield = msg.payload;
             if (!this->am_interested && am_Interested()) {
                 sendInterested();
@@ -190,27 +193,27 @@ void PeerConnection::handleMessage(const BTMessage& msg) {
         
         case 7: { // PIECE
             if (msg.payload.size() >= 8) {
-                // Uso di ntohl come già facevi per gestire l'endianness
                 uint32_t index = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data()));
                 uint32_t begin = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data() + 4));
-                
                 const uint8_t* blockData = msg.payload.data() + 8;
                 size_t blockSize = msg.payload.size() - 8;
 
-                // Chiamata al manager (gestisce lui il mutex internamente)
-                if (this->piece_manager->addBlock(index, begin, blockData, blockSize)) {
-                    // Il pezzo è completato con successo
-                    // Possiamo chiedere il prossimo pezzo al peer
+                // addBlock ritorna true solo se il pezzo è COMPLETO e VERIFICATO
+                bool isComplete = this->piece_manager->addBlock(index, begin, blockData, blockSize);
+
+                if (isComplete) {
+                    // Se il pezzo è finito, cerchiamo il prossimo pezzo da questo peer
                     int nextPiece = this->piece_manager->pickPiece(this->peer_bitfield);
                     if (nextPiece != -1 && !peer_choking) {
                         this->sendRequest(nextPiece, 0, 16384);
                     }
                 } else if (!peer_choking) {
-                    // Chiedi il blocco successivo dello STESSO pezzo
-                    // (Assumendo una pipeline semplice a un blocco alla volta)
+                    // Se il pezzo NON è finito, chiediamo il blocco SUCCESSIVO (offset + 16KB)
                     uint32_t nextOffset = begin + blockSize;
-                    // Verifica di non superare la dimensione del pezzo
-                    if (nextOffset < this->piece_manager->piece_length) {
+                    
+                    // Verifica di non andare oltre la dimensione del pezzo
+                    uint32_t pLen = this->piece_manager->piece_length;
+                    if (nextOffset < pLen) {
                         this->sendRequest(index, nextOffset, 16384);
                     }
                 }
@@ -220,11 +223,11 @@ void PeerConnection::handleMessage(const BTMessage& msg) {
         
 
         case 0xFF: // KEEP-ALIVE
-            std::cout << "[Msg] KEEP-ALIVE ricevuto." << std::endl;
+            //std::cout << "[Msg] KEEP-ALIVE ricevuto." << std::endl;
             break;
 
         default:
-            std::cout << "[Msg] Ricevuto ID sconosciuto: " << (int)msg.id << " Lunghezza: " << msg.length << std::endl;
+            //std::cout << "[Msg] Ricevuto ID sconosciuto: " << (int)msg.id << " Lunghezza: " << msg.length << std::endl;
             break;
     }
 }
@@ -237,7 +240,7 @@ void PeerConnection::startMessageLoop() {
         BTMessage msg = readMessage();
         
         if (msg.length == 0 && msg.id == 0) { 
-             std::cout << "Connessione chiusa dal peer " << ip << std::endl;
+             //std::cout << "Connessione chiusa dal peer " << ip << std::endl;
              break;
         }
         
@@ -275,9 +278,9 @@ void PeerConnection::sendInterested() {
 
     if (sent == sizeof(message)) {
         this->am_interested = true;
-        std::cout << "[Out] Inviato messaggio INTERESTED a " << ip << std::endl;
+        //std::cout << "[Out] Inviato messaggio INTERESTED a " << ip << std::endl;
     } else {
-        std::cerr << "[Err] Errore nell'invio del messaggio INTERESTED" << std::endl;
+        //std::cerr << "[Err] Errore nell'invio del messaggio INTERESTED" << std::endl;
     }
 }
 
@@ -298,7 +301,7 @@ void PeerConnection::sendRequest(uint32_t index, uint32_t begin, uint32_t length
     memcpy(packet + 13, &n_length, 4);
 
     send(sockfd, packet, 17, 0);
-    std::cout << "[Out] Richiesto pezzo #" << index << " blocco " << begin << std::endl;
+    //std::cout << "[Out] Richiesto pezzo #" << index << " blocco " << begin << std::endl;
 }
 
 
@@ -322,7 +325,7 @@ void PeerConnection::sendBitfield() {
     memcpy(ptr + 5, current_bf.data(), current_bf.size());
 
     send(sockfd, packet.data(), packet.size(), 0);
-    std::cout << "[Out] Inviato il mio BITFIELD (" << current_bf.size() << " byte)" << std::endl;
+    //std::cout << "[Out] Inviato il mio BITFIELD (" << current_bf.size() << " byte)" << std::endl;
 }
 
 

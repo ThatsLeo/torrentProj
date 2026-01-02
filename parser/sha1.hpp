@@ -1,3 +1,6 @@
+#ifndef SHA1_HPP
+#define SHA1_HPP
+
 #include <cstdint>
 #include <cstring>
 
@@ -253,3 +256,5 @@ public:
         return *this;
     }
 };
+
+#endif 
