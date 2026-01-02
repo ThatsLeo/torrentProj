@@ -1,5 +1,9 @@
 #include "pieceManager.hpp"
 #include <algorithm> 
+#include "../parser/sha1.hpp"
+#include <iostream>
+#include <fstream>
+#include <iomanip>
 
 // Costruttore aggiornato con inizializzazione di piece_length e total_size
 PieceManager::PieceManager(size_t numPieces, uint32_t pLen, long long totalSize) 
@@ -88,4 +92,73 @@ std::vector<uint8_t>& PieceManager::getBitfield() {
 // Getter per il riferimento al mutex
 std::shared_mutex& PieceManager::getMutex() { 
     return rw_mutex; 
+}
+
+
+bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* blockData, size_t blockSize) {
+    std::unique_lock<std::shared_mutex> lock(rw_mutex); // Uso del tuo mutex esistente
+
+    // 1. Se il pezzo è già completo nel bitfield, ignoriamo il blocco
+    size_t byteIdx = index / 8;
+    if (byteIdx < global_bitfield.size()) {
+        if (global_bitfield[byteIdx] & (1 << (7 - (index % 8)))) {
+            return false; 
+        }
+    }
+
+    // 2. Inizializzazione del buffer se è il primo blocco del pezzo
+    if (in_progress.find(index) == in_progress.end()) {
+        uint32_t current_p_len = piece_length;
+        
+        // Calcolo per l'ultimo pezzo (potrebbe essere più corto)
+        long long numPieces = (total_size + piece_length - 1) / piece_length;
+        if (index == numPieces - 1) {
+            current_p_len = total_size - (index * (long long)piece_length);
+        }
+
+        in_progress[index].buffer.resize(current_p_len);
+        in_progress[index].bytes_received = 0;
+    }
+
+    // 3. Copia dei dati nel buffer
+    PieceProgress& p = in_progress[index];
+    if (begin + blockSize <= p.buffer.size()) {
+        std::copy(blockData, blockData + blockSize, p.buffer.begin() + begin);
+        p.bytes_received += blockSize;
+    }
+
+    // 4. Se il pezzo è completo, verifica l'Hash
+    if (p.bytes_received >= p.buffer.size()) {
+        sha1 hasher;
+        hasher.add(p.buffer.data(), p.buffer.size());
+        hasher.finalize(); //
+        
+        char calculated_hex[41];
+        hasher.print_hex(calculated_hex); // Otteniamo l'hash in formato hex
+
+        // Estrazione hash atteso dalla stringa binaria pieces_hashes
+        // Ogni hash binario è di 20 byte. Lo convertiamo in hex per il confronto.
+        std::string expected_bin = pieces_hashes.substr(index * 20, 20);
+        std::stringstream ss;
+        for(unsigned char c : expected_bin) {
+            ss << std::hex << std::setw(2) << std::setfill('0') << (int)c;
+        }
+        std::string expected_hex = ss.str();
+
+        if (std::string(calculated_hex) == expected_hex) {
+            std::cout << "[OK] Pezzo #" << index << " verificato." << std::endl;
+            
+            // Qui andrebbe la logica di scrittura su disco
+            // markAsComplete aggiorna il bitfield globale
+            markAsComplete(index); 
+            in_progress.erase(index);
+            return true;
+        } else {
+            std::cout << "[FAIL] Pezzo #" << index << " corrotto! Hash errato." << std::endl;
+            in_progress.erase(index); // Scartiamo i dati
+            return false;
+        }
+    }
+
+    return false;
 }

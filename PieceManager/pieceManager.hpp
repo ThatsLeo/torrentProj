@@ -5,6 +5,8 @@
 #include <shared_mutex>
 #include <mutex>
 #include <cstdint>
+#include <map>
+#include <string>
 
 class PieceManager {
 public:
@@ -28,12 +30,27 @@ public:
     long long getDownloadedBytes() const;
     long long getLeftBytes() const;
 
+    bool addBlock(uint32_t index, uint32_t begin, const uint8_t* blockData, size_t blockSize);
+
+    void setPiecesHashes(const std::string& hashes) {
+        this->pieces_hashes = hashes;
+    }
+
+
     // Getter
     std::vector<uint8_t>& getBitfield();
     std::shared_mutex& getMutex();
 
 private:
     int countSetBits(uint8_t n) const;
+
+    struct PieceProgress {
+        std::vector<uint8_t> buffer;
+        size_t bytes_received = 0;
+    };
+
+    std::map<uint32_t, PieceProgress> in_progress; // Pezzi in fase di scaricamento
+    std::string pieces_hashes; // La stringa binaria degli hash dal file .torrent
 };
 
 #endif

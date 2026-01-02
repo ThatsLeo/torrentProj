@@ -188,24 +188,35 @@ void PeerConnection::handleMessage(const BTMessage& msg) {
             }
             break;
         
-        case 7: // PIECE
-
+        case 7: { // PIECE
             if (msg.payload.size() >= 8) {
-                // Estraiamo l'indice e l'offset (i primi 8 byte del payload)
+                // Uso di ntohl come già facevi per gestire l'endianness
                 uint32_t index = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data()));
                 uint32_t begin = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data() + 4));
                 
-                // Il resto del payload sono i dati binari
                 const uint8_t* blockData = msg.payload.data() + 8;
                 size_t blockSize = msg.payload.size() - 8;
 
-                std::cout << "[In] Ricevuto blocco: Pezzo #" << index 
-                        << ", Offset " << begin 
-                        << ", Dimensione " << blockSize << " byte" << std::endl;
-
-                // Prossimo passo: scrivere blockData in un buffer o su disco!
+                // Chiamata al manager (gestisce lui il mutex internamente)
+                if (this->piece_manager->addBlock(index, begin, blockData, blockSize)) {
+                    // Il pezzo è completato con successo
+                    // Possiamo chiedere il prossimo pezzo al peer
+                    int nextPiece = this->piece_manager->pickPiece(this->peer_bitfield);
+                    if (nextPiece != -1 && !peer_choking) {
+                        this->sendRequest(nextPiece, 0, 16384);
+                    }
+                } else if (!peer_choking) {
+                    // Chiedi il blocco successivo dello STESSO pezzo
+                    // (Assumendo una pipeline semplice a un blocco alla volta)
+                    uint32_t nextOffset = begin + blockSize;
+                    // Verifica di non superare la dimensione del pezzo
+                    if (nextOffset < this->piece_manager->piece_length) {
+                        this->sendRequest(index, nextOffset, 16384);
+                    }
+                }
             }
             break;
+        }
         
 
         case 0xFF: // KEEP-ALIVE
