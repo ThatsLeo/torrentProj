@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <fstream>
 
 class PieceManager {
 public:
@@ -15,6 +16,7 @@ public:
     mutable std::shared_mutex rw_mutex;
     uint32_t piece_length;
     long long total_size; 
+    std::string download_filename = "output_file.dat";
 
     // Costruttore
     PieceManager(size_t numPieces, uint32_t pLen, long long totalSize);
@@ -36,6 +38,7 @@ public:
         this->pieces_hashes = hashes;
     }
 
+    void saveToDisk(uint32_t index, const std::vector<uint8_t>& data);
 
     // Getter
     std::vector<uint8_t>& getBitfield();

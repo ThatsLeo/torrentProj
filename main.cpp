@@ -47,6 +47,7 @@ int main(int argc, char* argv[]) {
 
         // 2. Inizializza il PieceManager con i 3 argomenti richiesti
         PieceManager pm(numPieces, pieceLength, totalSize);
+        pm.setPiecesHashes(torrent.getPiecesHash());
 
         // 3. Quando chiami il tracker, usa i nuovi metodi di PieceManager
         long long downloaded = pm.getDownloadedBytes();

@@ -148,8 +148,8 @@ bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* block
         if (std::string(calculated_hex) == expected_hex) {
             std::cout << "[OK] Pezzo #" << index << " verificato." << std::endl;
             
-            // Qui andrebbe la logica di scrittura su disco
-            // markAsComplete aggiorna il bitfield globale
+            saveToDisk(index, p.buffer);
+
             markAsComplete(index); 
             in_progress.erase(index);
             return true;
@@ -161,4 +161,38 @@ bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* block
     }
 
     return false;
+}
+
+void PieceManager::saveToDisk(uint32_t index, const std::vector<uint8_t>& data) {
+    // Calcolo dell'offset assoluto: indice del pezzo moltiplicato per la sua lunghezza standard
+    // Usiamo long long per evitare overflow su file grandi (> 2GB)
+    long long absoluteOffset = (long long)index * piece_length;
+
+    // Apriamo il file in modalità binaria. 
+    // "std::ios::in" è necessario insieme a "out" per evitare che il file venga troncato a ogni apertura.
+    std::fstream out(download_filename, std::ios::in | std::ios::out | std::ios::binary);
+
+    // Se il file non esiste ancora, lo creiamo e pre-allochiamo lo spazio totale
+    if (!out.is_open()) {
+        std::cout << "[Disk] Creazione file: " << download_filename << std::endl;
+        std::ofstream create_file(download_filename, std::ios::binary);
+        // Posizioniamoci alla fine del file per riservare lo spazio (total_size)
+        create_file.seekp(total_size - 1);
+        create_file.write("\0", 1);
+        create_file.close();
+        
+        // Riapriamo il file correttamente
+        out.open(download_filename, std::ios::in | std::ios::out | std::ios::binary);
+    }
+
+    if (out.is_open()) {
+        // Ci posizioniamo all'offset calcolato
+        out.seekp(absoluteOffset);
+        // Scriviamo l'intero pezzo
+        out.write(reinterpret_cast<const char*>(data.data()), data.size());
+        out.close();
+        // std::cout << "[Disk] Scritto pezzo #" << index << " all'offset " << absoluteOffset << std::endl;
+    } else {
+        std::cerr << "[Error] Impossibile accedere al disco per scrivere il pezzo #" << index << std::endl;
+    }
 }
