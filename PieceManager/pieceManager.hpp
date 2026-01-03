@@ -9,6 +9,7 @@
 #include <string>
 #include <fstream>
 #include <atomic>
+#include <filesystem>
 #include "../parser/TorrentFile.hpp"
 
 
@@ -21,7 +22,9 @@ public:
     long long total_size; 
     std::string download_filename = "output_file.dat";
     std::vector<FileInfo> filesList;
+
     std::atomic<long long> total_transferred{0}; 
+    std::string state_filename; 
 
     
     PieceManager(size_t numPieces, uint32_t pLen, long long totalSize);
@@ -50,6 +53,15 @@ public:
     std::vector<uint8_t>& getBitfield();
     std::shared_mutex& getMutex();
     long long getTotalTransferred() const { return total_transferred.load(); }
+
+    void setStateFile(const std::string& infoHashHex) {
+    // Crea una cartella dedicata se non esiste
+    std::filesystem::create_directories("resume_data");
+    this->state_filename = "resume_data/" + infoHashHex + ".resume";
+    }
+
+    void loadBitfield();
+    void saveBitfield();
 
 private:
     int countSetBits(uint8_t n) const;

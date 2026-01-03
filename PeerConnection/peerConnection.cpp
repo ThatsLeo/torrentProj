@@ -150,7 +150,7 @@ PeerConnection::BTMessage PeerConnection::readMessage() {
 
 void PeerConnection::handleMessage(const BTMessage& msg) {
 
-    const int PIPELINE_SIZE = 50;
+    const int PIPELINE_SIZE = 100;
 
     switch (msg.id) {
         case 0: 
@@ -255,10 +255,10 @@ void PeerConnection::startMessageLoop() {
 
 
 bool PeerConnection::am_Interested() {
-
     std::shared_lock<std::shared_mutex> lock(*this->bitfield_mutex);
-
-    for (size_t i = 0; i < peer_bitfield.size(); ++i) {
+    
+    size_t limit = std::min(peer_bitfield.size(), global_bitfield->size());
+    for (size_t i = 0; i < limit; ++i) {
         if ((peer_bitfield[i] & ~((*global_bitfield)[i])) != 0) {
             return true;
         }

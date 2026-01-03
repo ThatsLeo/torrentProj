@@ -13,7 +13,7 @@
 #include <atomic>
 #include <memory>
 
-#define MAX_ACTIVE_PEERS 80
+#define MAX_ACTIVE_PEERS 100
 
 struct ThreadControl {
     std::thread t;
@@ -45,8 +45,14 @@ int main(int argc, char* argv[]) {
         std::string infoHash = torrent.getInfoHashBinary();
         std::string myId = generateClientId();
         PieceManager pm(torrent.getPiecesHash().length() / 20, torrent.getPieceLength(), torrent.getTotalSize());
+        
+        pm.setStateFile(torrent.getInfoHash());
+        pm.loadBitfield();
+
         pm.setPiecesHashes(torrent.getPiecesHash()); 
         pm.setFilesList(torrent.getFilesList());
+        
+        
 
         TrackerClient tracker(torrent.getAnnounceUrl());
         std::vector<Peer> peers = tracker.announce(infoHash, myId, 0, pm.total_size, 0, 6881);

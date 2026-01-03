@@ -89,21 +89,19 @@ std::shared_mutex& PieceManager::getMutex() {
     return rw_mutex; 
 }
 
-
 bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* blockData, size_t blockSize) {
     std::unique_lock<std::shared_mutex> lock(rw_mutex); 
 
+    
     size_t byteIdx = index / 8;
-    if (byteIdx < global_bitfield.size()) {
-        if (global_bitfield[byteIdx] & (1 << (7 - (index % 8)))) return false; 
-    }
-
+    if (byteIdx >= global_bitfield.size()) return false;
+    if (global_bitfield[byteIdx] & (1 << (7 - (index % 8)))) return false; 
 
     if (in_progress.find(index) == in_progress.end()) {
-        uint32_t current_p_len = piece_length;
         long long numPieces = (total_size + piece_length - 1) / piece_length;
-        
+        if (index >= (uint32_t)numPieces) return false; 
 
+        uint32_t current_p_len = piece_length;
         if (index == (uint32_t)(numPieces - 1)) {
             current_p_len = static_cast<uint32_t>(total_size - (index * (long long)piece_length));
         }
@@ -111,8 +109,6 @@ bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* block
         PieceProgress& new_p = in_progress[index];
         new_p.buffer.resize(current_p_len);
         new_p.bytes_received = 0;
-        
-
         uint32_t num_blocks = (current_p_len + 16383) / 16384;
         new_p.blocks_received.assign(num_blocks, false);
     }
@@ -120,20 +116,16 @@ bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* block
     PieceProgress& p = in_progress[index];
     uint32_t blockIndex = begin / 16384;
 
-
     if (blockIndex < p.blocks_received.size() && !p.blocks_received[blockIndex]) {
         if (begin + blockSize <= p.buffer.size()) {
             std::copy(blockData, blockData + blockSize, p.buffer.begin() + begin);
             p.blocks_received[blockIndex] = true;
             p.bytes_received += blockSize;
-            
-
             total_transferred += blockSize; 
         }
     } else {
         return false; 
     }
-
 
     if (p.bytes_received >= p.buffer.size()) {
         sha1 hasher;
@@ -142,34 +134,39 @@ bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* block
         
         char calculated_hex[41];
         hasher.print_hex(calculated_hex);
+        
+        std::string calc_str(calculated_hex, 40);
+
+        
+        if ((index * 20) + 20 > pieces_hashes.length()) {
+            in_progress.erase(index);
+            return false;
+        }
 
         std::string expected_bin = pieces_hashes.substr(index * 20, 20);
         std::stringstream ss;
         for(unsigned char c : expected_bin) ss << std::hex << std::setw(2) << std::setfill('0') << (int)c;
         std::string expected_hex = ss.str();
 
-        if (std::string(calculated_hex) == expected_hex) {
-
+        if (calc_str == expected_hex) {
             std::vector<uint8_t> completedData = std::move(p.buffer);
             in_progress.erase(index);
-
             lock.unlock();
 
             saveToDisk(index, completedData);
             
             std::unique_lock<std::shared_mutex> finalLock(rw_mutex);
-            global_bitfield[index / 8] |= (1 << (7 - (index % 8)));
+            _markAsComplete(index);
+
+            saveBitfield();
             return true;
         } else {
-
-            std::cout << "[FAIL] Pezzo #" << index << " corrotto! Hash errato. Resetting..." << std::endl;
             in_progress.erase(index);
             return false;
         }
     }
     return false;
 }
-
 
 void PieceManager::saveToDisk(uint32_t index, const std::vector<uint8_t>& data) {
     long long pieceGlobalOffset = (long long)index * piece_length;
@@ -204,5 +201,40 @@ void PieceManager::saveToDisk(uint32_t index, const std::vector<uint8_t>& data) 
         }
         currentFileStart += file.length;
         if (bytesRemaining <= 0) break;
+    }
+}
+
+void PieceManager::saveBitfield() {
+    if (state_filename.empty()) return;
+    
+    std::shared_lock<std::shared_mutex> lock(rw_mutex);
+    std::ofstream ofs(state_filename, std::ios::binary);
+    if (ofs.is_open()) {
+        // AGGIUNGI QUESTA RIGA PER IL DEBUG
+        std::cout << "\n[DEBUG] Salvataggio bitfield in: " << std::filesystem::absolute(state_filename) << std::endl;
+        
+        ofs.write(reinterpret_cast<const char*>(global_bitfield.data()), global_bitfield.size());
+        ofs.close();
+    } else {
+        std::cerr << "\n[ERRORE] Impossibile creare il file: " << state_filename << " (Errore: " << strerror(errno) << ")" << std::endl;
+    }
+}
+
+void PieceManager::loadBitfield() {
+    if (state_filename.empty()) return;
+
+    std::ifstream ifs(state_filename, std::ios::binary);
+    if (ifs.is_open()) {
+        // Controlliamo che la dimensione del file corrisponda a quella attesa
+        ifs.seekg(0, std::ios::end);
+        size_t fileSize = ifs.tellg();
+        ifs.seekg(0, std::ios::beg);
+
+        if (fileSize == global_bitfield.size()) {
+            std::unique_lock<std::shared_mutex> lock(rw_mutex);
+            ifs.read(reinterpret_cast<char*>(global_bitfield.data()), global_bitfield.size());
+            std::cout << "[Resume] Stato caricato correttamente dal registro." << std::endl;
+        }
+        ifs.close();
     }
 }
