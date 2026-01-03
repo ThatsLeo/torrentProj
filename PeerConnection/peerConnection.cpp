@@ -151,10 +151,11 @@ PeerConnection::BTMessage PeerConnection::readMessage() {
 void PeerConnection::handleMessage(const BTMessage& msg) {
 
     const int PIPELINE_SIZE = 100;
+    const int BLOCK_SIZE = 16384;
 
     switch (msg.id) {
         case 0: 
-            //std::cout << "[Msg] CHOKE: Il peer " << ip << " ci ha bloccati (normale)." << std::endl;
+            //std::cout << "[Msg] CHOKE" << std::endl;
             peer_choking = true;
             break;
         
@@ -164,10 +165,21 @@ void PeerConnection::handleMessage(const BTMessage& msg) {
                 int pieceToRequest = this->piece_manager->pickPiece(this->peer_bitfield);
                 if (pieceToRequest != -1) {
                     
+
+                    uint32_t currentPieceLen = this->piece_manager->getPieceLength(pieceToRequest);
+
                     for (int i = 0; i < PIPELINE_SIZE; ++i) {
-                        uint32_t offset = i * 16384;
-                        if (offset < this->piece_manager->piece_length) {
-                            this->sendRequest(pieceToRequest, offset, 16384);
+                        uint32_t offset = i * BLOCK_SIZE;
+                        
+                        if (offset < currentPieceLen) {
+                            
+                            
+                            uint32_t blockSize = BLOCK_SIZE;
+                            if (offset + blockSize > currentPieceLen) {
+                                blockSize = currentPieceLen - offset;
+                            }
+
+                            this->sendRequest(pieceToRequest, offset, blockSize);
                         }
                     }
                 }
@@ -176,17 +188,16 @@ void PeerConnection::handleMessage(const BTMessage& msg) {
 
         case 4: 
             if (msg.payload.size() == 4) {
-            uint32_t index = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data()));
-            size_t byteIdx = index / 8;
-            if (byteIdx < peer_bitfield.size()) {
-                peer_bitfield[byteIdx] |= (1 << (7 - (index % 8)));
-            }
-            if (!this->am_interested && am_Interested()) sendInterested();
+                uint32_t index = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data()));
+                size_t byteIdx = index / 8;
+                if (byteIdx < peer_bitfield.size()) {
+                    peer_bitfield[byteIdx] |= (1 << (7 - (index % 8)));
+                }
+                if (!this->am_interested && am_Interested()) sendInterested();
             }
             break;
 
         case 5: 
-            //std::cout << "[Msg] BITFIELD ricevuto da " << ip << " (" << msg.payload.size() << " bytes)" << std::endl;
             this->peer_bitfield = msg.payload;
             if (!this->am_interested && am_Interested()) {
                 sendInterested();
@@ -195,44 +206,62 @@ void PeerConnection::handleMessage(const BTMessage& msg) {
         
         case 7: { 
             if (msg.payload.size() >= 8) {
-            uint32_t index = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data()));
-            uint32_t begin = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data() + 4));
-            const uint8_t* blockData = msg.payload.data() + 8;
-            size_t blockSize = msg.payload.size() - 8;
+                uint32_t index = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data()));
+                uint32_t begin = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data() + 4));
+                const uint8_t* blockData = msg.payload.data() + 8;
+                size_t blockSize = msg.payload.size() - 8;
 
-            bool isComplete = this->piece_manager->addBlock(index, begin, blockData, blockSize);
+                bool isComplete = this->piece_manager->addBlock(index, begin, blockData, blockSize);
 
-            if (!peer_choking) {
-                if (isComplete) {
-                    
-                    int nextPiece = this->piece_manager->pickPiece(this->peer_bitfield);
-                    if (nextPiece != -1) {
-                        for (int i = 0; i < PIPELINE_SIZE; ++i) {
-                            uint32_t offset = i * 16384;
-                            if (offset < this->piece_manager->piece_length) {
-                                this->sendRequest(nextPiece, offset, 16384);
+                if (!peer_choking) {
+                    if (isComplete) {
+
+                        int nextPiece = this->piece_manager->pickPiece(this->peer_bitfield);
+                        if (nextPiece != -1) {
+                            
+
+                            uint32_t nextPieceLen = this->piece_manager->getPieceLength(nextPiece);
+
+                            for (int i = 0; i < PIPELINE_SIZE; ++i) {
+                                uint32_t offset = i * BLOCK_SIZE;
+                                if (offset < nextPieceLen) {
+                                    
+
+                                    uint32_t reqSize = BLOCK_SIZE;
+                                    if (offset + reqSize > nextPieceLen) {
+                                        reqSize = nextPieceLen - offset;
+                                    }
+
+                                    this->sendRequest(nextPiece, offset, reqSize);
+                                }
                             }
                         }
-                    }
-                } else {
-                    
-                    uint32_t nextRequestOffset = begin + (PIPELINE_SIZE * 16384);
-                    if (nextRequestOffset < this->piece_manager->piece_length) {
-                        this->sendRequest(index, nextRequestOffset, 16384);
+                    } else {
+                        
+                        uint32_t currentPieceLen = this->piece_manager->getPieceLength(index);
+
+                        uint32_t nextRequestOffset = begin + (PIPELINE_SIZE * BLOCK_SIZE);
+                        
+                        if (nextRequestOffset < currentPieceLen) {
+                            
+                            
+                            uint32_t reqSize = BLOCK_SIZE;
+                            if (nextRequestOffset + reqSize > currentPieceLen) {
+                                reqSize = currentPieceLen - nextRequestOffset;
+                            }
+
+                            this->sendRequest(index, nextRequestOffset, reqSize);
+                        }
                     }
                 }
             }
+            break;
         }
-        break;
-        }
-        
 
         case 0xFF: 
-            //std::cout << "[Msg] KEEP-ALIVE ricevuto." << std::endl;
             break;
 
         default:
-            //std::cout << "[Msg] Ricevuto ID sconosciuto: " << (int)msg.id << " Lunghezza: " << msg.length << std::endl;
             break;
     }
 }

@@ -12,12 +12,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cpr)
 
-# FORZIAMO il compilatore a guardare dentro la cartella degli header di CPR
+
 include_directories(
     parser
     peerID
     TrackerClient
-    ${cpr_SOURCE_DIR}/include  # <--- Questo è il "percorso assoluto" dinamico
+    ${cpr_SOURCE_DIR}/include  
 )
 
 add_executable(torrent_app 
@@ -30,5 +30,4 @@ add_executable(torrent_app
     PieceManager/pieceManager.cpp
 )
 
-# Assicurati che il nome del target sia corretto
 target_link_libraries(torrent_app PRIVATE cpr::cpr)

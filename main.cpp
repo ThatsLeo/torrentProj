@@ -8,23 +8,22 @@
 #include <thread>
 #include <chrono>
 #include <list>
-#include <deque>          // <--- Per la pool efficiente
+#include <deque>          
 #include <algorithm>
 #include <iomanip>
 #include <atomic>
 #include <memory>
-#include <random>         // <--- Per lo shuffle
+#include <random>         
 
 #define MAX_ACTIVE_PEERS 100 
 
-// Struttura aggiornata per sapere CHI sta girando su quale thread
+
 struct ThreadControl {
     std::thread t;
     std::shared_ptr<std::atomic<bool>> finished;
-    Peer peer; // Salviamo i dati del peer per evitare duplicati
+    Peer peer; 
 };
 
-// Helper: Controlla se un peer è già attivo (connesso)
 bool isPeerActive(const std::vector<std::unique_ptr<ThreadControl>>& activeThreads, const Peer& p) {
     for (const auto& tc : activeThreads) {
         if (tc->peer.ip == p.ip && tc->peer.port == p.port) {
@@ -34,7 +33,6 @@ bool isPeerActive(const std::vector<std::unique_ptr<ThreadControl>>& activeThrea
     return false;
 }
 
-// Helper: Controlla se un peer è già in attesa nella pool
 bool isPeerInPool(const std::deque<Peer>& pool, const Peer& p) {
     for (const auto& waiting : pool) {
         if (waiting.ip == p.ip && waiting.port == p.port) {
@@ -70,7 +68,6 @@ int main(int argc, char* argv[]) {
         std::string myId = generateClientId();
         PieceManager pm(torrent.getPiecesHash().length() / 20, torrent.getPieceLength(), torrent.getTotalSize());
         
-        // --- 1. Gestione Resume (Hex Conversion) ---
         std::stringstream ss;
         for(unsigned char c : infoHash) {
             ss << std::hex << std::setw(2) << std::setfill('0') << (int)c;
@@ -79,16 +76,15 @@ int main(int argc, char* argv[]) {
 
         pm.setStateFile(infoHashHex);
         pm.loadBitfield();
-        pm.saveBitfield(); // Forza creazione file se non esiste
+        pm.saveBitfield(); 
 
         pm.setPiecesHashes(torrent.getPiecesHash()); 
         pm.setFilesList(torrent.getFilesList());
         
-        // --- 2. Setup Tracker e Random ---
         TrackerClient tracker(torrent.getAnnounceUrl());
         
         std::random_device rd;
-        std::mt19937 g(rd()); // Generatore random
+        std::mt19937 g(rd()); 
         
         std::deque<Peer> peerPool; 
         std::vector<std::unique_ptr<ThreadControl>> activeThreads;
@@ -96,23 +92,23 @@ int main(int argc, char* argv[]) {
         long long downloaded = pm.getDownloadedBytes();
         long long left = pm.getLeftBytes();
 
-        // Prima richiesta al tracker
+        
         std::vector<Peer> initialPeers = tracker.announce(infoHash, myId, downloaded, left, 0, 6881);
         
-        // Mescoliamo subito
+        
         std::shuffle(initialPeers.begin(), initialPeers.end(), g);
         for(const auto& p : initialPeers) peerPool.push_back(p);
 
         auto startTime = std::chrono::steady_clock::now();
         std::cout << "Download avviato per: " << argv[1] << "\n" << std::endl;
 
-        // Variabili per calcolo velocità istantanea
+        
         long long lastBytes = pm.getTotalTransferred();
         auto lastTime = std::chrono::steady_clock::now();
 
         while (pm.getLeftBytes() > 0) {
             
-            // A. Pulizia thread finiti
+            
             activeThreads.erase(std::remove_if(activeThreads.begin(), activeThreads.end(),
                 [](const std::unique_ptr<ThreadControl>& tc) {
                     if (tc->finished->load()) { 
@@ -123,24 +119,24 @@ int main(int argc, char* argv[]) {
                 }), 
                 activeThreads.end());
 
-            // B. Riempimento Thread (Smart Check)
+            
             while (activeThreads.size() < MAX_ACTIVE_PEERS && !peerPool.empty()) {
                 Peer candidate = peerPool.front();
                 peerPool.pop_front();
 
-                // Se è già attivo, lo saltiamo e ne proviamo un altro
+                
                 if (isPeerActive(activeThreads, candidate)) {
                     continue;
                 }
 
                 auto tc = std::make_unique<ThreadControl>();
                 tc->finished = std::make_shared<std::atomic<bool>>(false);
-                tc->peer = candidate; // Memorizziamo info peer
+                tc->peer = candidate; 
                 tc->t = std::thread(runPeer, candidate, infoHash, myId, &pm, tc->finished);
                 activeThreads.push_back(std::move(tc));
             }
 
-            // C. Calcolo Statistiche (MB/s vs KB/s)
+            
             downloaded = pm.getDownloadedBytes();
             double progress = (static_cast<double>(downloaded) / pm.total_size) * 100.0;
             
@@ -150,12 +146,12 @@ int main(int argc, char* argv[]) {
             long long currentTotal = pm.getTotalTransferred();
             
             double speed = 0.0;
-            if (dt.count() >= 1.0) { // Aggiorniamo la velocità circa ogni secondo
+            if (dt.count() >= 1.0) { 
                 speed = (currentTotal - lastBytes) / dt.count() / 1024.0; // KB/s
                 lastBytes = currentTotal;
                 lastTime = currentTime;
             } else {
-                 // Stima temporanea se il loop è più veloce di 1s
+                 
                  speed = (currentTotal - lastBytes) / std::max(dt.count(), 0.001) / 1024.0;
             }
 
@@ -172,18 +168,18 @@ int main(int argc, char* argv[]) {
             }
             std::cout << std::flush;
 
-            // D. Re-Announce Smart (Mescola e Filtra)
+            
             if (peerPool.size() < 10 || activeThreads.size() < 5) {
                 downloaded = pm.getDownloadedBytes();
                 left = pm.getLeftBytes();
                 
                 auto newPeers = tracker.announce(infoHash, myId, downloaded, left, 0, 6881);
                 
-                // Mescola i nuovi arrivi
+                
                 std::shuffle(newPeers.begin(), newPeers.end(), g);
 
                 for (const auto& np : newPeers) {
-                    // Aggiungi solo se NON è attivo E NON è già in coda
+                    
                     if (!isPeerActive(activeThreads, np) && !isPeerInPool(peerPool, np)) {
                         peerPool.push_back(np);
                     }

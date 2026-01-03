@@ -114,6 +114,13 @@ bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* block
     }
 
     PieceProgress& p = in_progress[index];
+
+    uint32_t realPieceLen = getPieceLength(index);
+    if (begin + blockSize > realPieceLen) {
+        
+        return false; 
+    }
+
     uint32_t blockIndex = begin / 16384;
 
     if (blockIndex < p.blocks_received.size() && !p.blocks_received[blockIndex]) {
@@ -227,7 +234,7 @@ void PieceManager::loadBitfield() {
 
     std::ifstream ifs(state_filename, std::ios::binary);
     if (ifs.is_open()) {
-        // Controlliamo che la dimensione del file corrisponda a quella attesa
+        
         ifs.seekg(0, std::ios::end);
         size_t fileSize = ifs.tellg();
         ifs.seekg(0, std::ios::beg);
@@ -239,4 +246,17 @@ void PieceManager::loadBitfield() {
         }
         ifs.close();
     }
+}
+
+
+
+uint32_t PieceManager::getPieceLength(uint32_t index) {
+    long long numPieces = (total_size + piece_length - 1) / piece_length;
+    
+    if (index == numPieces - 1) {
+        uint32_t remainder = total_size % piece_length;
+        return (remainder == 0) ? piece_length : remainder;
+    }
+    
+    return piece_length; 
 }

@@ -39,6 +39,7 @@ public:
     
     long long getDownloadedBytes() const;
     long long getLeftBytes() const;
+    uint32_t getPieceLength(uint32_t index);
 
     bool addBlock(uint32_t index, uint32_t begin, const uint8_t* blockData, size_t blockSize);
 
@@ -55,7 +56,7 @@ public:
     long long getTotalTransferred() const { return total_transferred.load(); }
 
     void setStateFile(const std::string& infoHashHex) {
-    // Crea una cartella dedicata se non esiste
+    
     std::filesystem::create_directories("resume_data");
     this->state_filename = "resume_data/" + infoHashHex + ".resume";
     }
