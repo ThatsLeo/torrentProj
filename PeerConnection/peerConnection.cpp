@@ -149,6 +149,9 @@ PeerConnection::BTMessage PeerConnection::readMessage() {
 
 
 void PeerConnection::handleMessage(const BTMessage& msg) {
+
+    const int PIPELINE_SIZE = 50;
+
     switch (msg.id) {
         case 0: // CHOKE
             //std::cout << "[Msg] CHOKE: Il peer " << ip << " ci ha bloccati (normale)." << std::endl;
@@ -157,17 +160,16 @@ void PeerConnection::handleMessage(const BTMessage& msg) {
         
         case 1: // UNCHOKE
             this->peer_choking = false;
-            //std::cout << "[Msg] UNCHOKE da " << ip << ". Scelgo un pezzo..." << std::endl;
-            
             {
-                // Chiediamo al manager quale pezzo scaricare da questo peer
                 int pieceToRequest = this->piece_manager->pickPiece(this->peer_bitfield);
-                
                 if (pieceToRequest != -1) {
-                    // Chiediamo il primo blocco (16KB) del pezzo scelto
-                    this->sendRequest(pieceToRequest, 0, 16384);
-                } else {
-                    //std::cout << "[Info] Il peer " << ip << " non ha pezzi che mi mancano." << std::endl;
+                    // Inviamo un burst iniziale di 50 richieste
+                    for (int i = 0; i < PIPELINE_SIZE; ++i) {
+                        uint32_t offset = i * 16384;
+                        if (offset < this->piece_manager->piece_length) {
+                            this->sendRequest(pieceToRequest, offset, 16384);
+                        }
+                    }
                 }
             }
             break;
@@ -193,32 +195,36 @@ void PeerConnection::handleMessage(const BTMessage& msg) {
         
         case 7: { // PIECE
             if (msg.payload.size() >= 8) {
-                uint32_t index = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data()));
-                uint32_t begin = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data() + 4));
-                const uint8_t* blockData = msg.payload.data() + 8;
-                size_t blockSize = msg.payload.size() - 8;
+            uint32_t index = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data()));
+            uint32_t begin = ntohl(*reinterpret_cast<const uint32_t*>(msg.payload.data() + 4));
+            const uint8_t* blockData = msg.payload.data() + 8;
+            size_t blockSize = msg.payload.size() - 8;
 
-                // addBlock ritorna true solo se il pezzo è COMPLETO e VERIFICATO
-                bool isComplete = this->piece_manager->addBlock(index, begin, blockData, blockSize);
+            bool isComplete = this->piece_manager->addBlock(index, begin, blockData, blockSize);
 
+            if (!peer_choking) {
                 if (isComplete) {
-                    // Se il pezzo è finito, cerchiamo il prossimo pezzo da questo peer
+                    // Se il pezzo è finito, chiediamo subito il burst iniziale del prossimo pezzo
                     int nextPiece = this->piece_manager->pickPiece(this->peer_bitfield);
-                    if (nextPiece != -1 && !peer_choking) {
-                        this->sendRequest(nextPiece, 0, 16384);
+                    if (nextPiece != -1) {
+                        for (int i = 0; i < PIPELINE_SIZE; ++i) {
+                            uint32_t offset = i * 16384;
+                            if (offset < this->piece_manager->piece_length) {
+                                this->sendRequest(nextPiece, offset, 16384);
+                            }
+                        }
                     }
-                } else if (!peer_choking) {
-                    // Se il pezzo NON è finito, chiediamo il blocco SUCCESSIVO (offset + 16KB)
-                    uint32_t nextOffset = begin + blockSize;
-                    
-                    // Verifica di non andare oltre la dimensione del pezzo
-                    uint32_t pLen = this->piece_manager->piece_length;
-                    if (nextOffset < pLen) {
-                        this->sendRequest(index, nextOffset, 16384);
+                } else {
+                    // Se il pezzo NON è finito, chiediamo il blocco che sta PIPELINE_SIZE posizioni avanti
+                    // Questo mantiene la coda sempre a 50 richieste
+                    uint32_t nextRequestOffset = begin + (PIPELINE_SIZE * 16384);
+                    if (nextRequestOffset < this->piece_manager->piece_length) {
+                        this->sendRequest(index, nextRequestOffset, 16384);
                     }
                 }
             }
-            break;
+        }
+        break;
         }
         
 

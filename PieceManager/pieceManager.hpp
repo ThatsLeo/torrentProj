@@ -8,6 +8,7 @@
 #include <map>
 #include <string>
 #include <fstream>
+#include <atomic>
 #include "../parser/TorrentFile.hpp"
 
 
@@ -20,6 +21,7 @@ public:
     long long total_size; 
     std::string download_filename = "output_file.dat";
     std::vector<FileInfo> filesList;
+    std::atomic<long long> total_transferred{0}; 
 
     // Costruttore
     PieceManager(size_t numPieces, uint32_t pLen, long long totalSize);
@@ -47,9 +49,12 @@ public:
     // Getter
     std::vector<uint8_t>& getBitfield();
     std::shared_mutex& getMutex();
+    long long getTotalTransferred() const { return total_transferred.load(); }
 
 private:
     int countSetBits(uint8_t n) const;
+
+    void _markAsComplete(int pieceIndex);
 
     struct PieceProgress {
         std::vector<uint8_t> buffer;

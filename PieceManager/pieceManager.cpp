@@ -60,9 +60,12 @@ bool PieceManager::isPieceNeeded(int byteIndex, uint8_t peerByte) const {
 
 void PieceManager::markAsComplete(int pieceIndex) {
     std::unique_lock<std::shared_mutex> lock(rw_mutex);
+    _markAsComplete(pieceIndex);
+}
+
+void PieceManager::_markAsComplete(int pieceIndex) {
     size_t byteIdx = pieceIndex / 8;
     if (byteIdx < global_bitfield.size()) {
-        // Imposta il bit corretto a 1 (MSB first)
         global_bitfield[byteIdx] |= (1 << (7 - (pieceIndex % 8)));
     }
 }
@@ -120,6 +123,8 @@ bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* block
     if (begin + blockSize <= p.buffer.size()) {
         std::copy(blockData, blockData + blockSize, p.buffer.begin() + begin);
         p.bytes_received += blockSize;
+        
+        total_transferred += blockSize; 
     }
 
     // 4. Verifica Hash
@@ -137,18 +142,24 @@ bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* block
         std::string expected_hex = ss.str();
 
         if (std::string(calculated_hex) == expected_hex) {
-            std::cout << "[OK] Pezzo #" << index << " verificato." << std::endl;
+            //std::cout << "[OK] Pezzo #" << index << " verificato." << std::endl;
             
-            saveToDisk(index, p.buffer);
-
-            // --- FISSA QUI: Aggiorna il bitfield direttamente senza chiamare markAsComplete ---
-            if (byteIdx < global_bitfield.size()) {
-                global_bitfield[byteIdx] |= (1 << (7 - (index % 8)));
-            }
-            
+            std::vector<uint8_t> completedData = std::move(p.buffer);
             in_progress.erase(index);
+
+            lock.unlock();
+
+            saveToDisk(index, completedData);
+
+            std::unique_lock<std::shared_mutex> finalLock(rw_mutex);
+            
+            _markAsComplete(index);
+
             return true;
-        } else {
+
+        }
+        
+        else {
             std::cout << "[FAIL] Pezzo #" << index << " corrotto! Hash errato." << std::endl;
             in_progress.erase(index);
             return false;
