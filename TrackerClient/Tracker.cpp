@@ -55,14 +55,14 @@ std::vector<Peer> TrackerClient::announceHTTP(const std::string& infoHash, const
     cpr::Response r = cpr::Get(
     cpr::Url{this->url},
     cpr::Parameters{
-            {"info_hash",  infoHash}, // cpr codifica automaticamente
+            {"info_hash",  infoHash}, 
             {"peer_id",    peerId},
             {"port",       std::to_string(listenPort)},
             {"uploaded",   std::to_string(totalUploaded)},
             {"downloaded", std::to_string(totalDownloaded)},
             {"left",       std::to_string(left)},
             {"compact",    "1"},
-            {"numwant",    "50"} // Opzionale: chiedi esplicitamente 50 peer
+            {"numwant",    "50"} 
         },
     cpr::Timeout{15000}
     );
@@ -138,13 +138,11 @@ std::vector<Peer> TrackerClient::announceUDP(
 
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     
-    // Timeout per evitare che il programma si blocchi se il tracker è offline
     struct timeval tv;
     tv.tv_sec = 5; 
     tv.tv_usec = 0;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    // --- 1. CONNECTION REQUEST ---
     struct __attribute__((packed)) {
         uint64_t protocol_id; 
         uint32_t action;      
@@ -153,7 +151,7 @@ std::vector<Peer> TrackerClient::announceUDP(
 
     uint32_t current_transaction_id = std::rand();
     conn_req.protocol_id = htobe64(0x41727101980); 
-    conn_req.action = htonl(0); // 0 = Connect
+    conn_req.action = htonl(0); 
     conn_req.transaction_id = htonl(current_transaction_id);
 
     sendto(sockfd, &conn_req, sizeof(conn_req), 0, res->ai_addr, res->ai_addrlen);
@@ -175,7 +173,6 @@ std::vector<Peer> TrackerClient::announceUDP(
 
     uint64_t connection_id = conn_res.connection_id; 
 
-    // --- 2. ANNOUNCE REQUEST ---
     struct __attribute__((packed)) {
         uint64_t connection_id;
         uint32_t action;
@@ -194,21 +191,19 @@ std::vector<Peer> TrackerClient::announceUDP(
 
     uint32_t ann_transaction_id = std::rand();
 
-    ann_req.connection_id = connection_id; // Già in network byte order dalla risposta
-    ann_req.action = htonl(1);             // 1 = Announce
+    ann_req.connection_id = connection_id; 
+    ann_req.action = htonl(1);
     ann_req.transaction_id = htonl(ann_transaction_id);
 
     std::memcpy(ann_req.info_hash, infoHash.data(), 20);
     std::memcpy(ann_req.peer_id, peerId.data(), 20);
 
-    // Variabili dinamiche
+
     ann_req.downloaded = htobe64(static_cast<uint64_t>(downloaded));
     ann_req.left       = htobe64(static_cast<uint64_t>(left));
     ann_req.uploaded   = htobe64(static_cast<uint64_t>(uploaded));
     
-    /* Eventi UDP:
-       0: none; 1: completed; 2: started; 3: stopped 
-    */
+    
     ann_req.event      = htonl(event);          
     ann_req.ip_address = htonl(0);          
     ann_req.key        = htonl(std::rand());
@@ -217,7 +212,6 @@ std::vector<Peer> TrackerClient::announceUDP(
 
     sendto(sockfd, &ann_req, sizeof(ann_req), 0, res->ai_addr, res->ai_addrlen);
 
-    // --- 3. RECEIVE PEERS ---
     uint8_t buffer[2048]; 
     addr_len = res->ai_addrlen;
     rec = recvfrom(sockfd, buffer, sizeof(buffer), 0, res->ai_addr, &addr_len);

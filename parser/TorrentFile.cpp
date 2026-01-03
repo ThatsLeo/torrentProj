@@ -38,13 +38,13 @@ Bnode* TorrentFile::parse_int(char* &ptr) {
     Bnode* node = new Bnode(INTEGER);
     node->raw_start = ptr;
     if (*ptr != 'i') throw std::runtime_error("Expected integer");
-    ++ptr; // skip 'i'
+    ++ptr; 
 
     char* num_start = ptr;
     while (*ptr != 'e') ++ptr;
     node->int_val = std::stoll(std::string(num_start, ptr - num_start));
 
-    ++ptr; // skip 'e'
+    ++ptr; 
     node->raw_end = ptr;
     return node;
 }
@@ -58,7 +58,7 @@ Bnode* TorrentFile::parse_string(char* &ptr) {
     std::string len_str(len_start, ptr - len_start);
     size_t len = std::stoull(len_str);
 
-    ++ptr; // skip ':'
+    ++ptr; 
     node->str_val.assign(ptr, len);
     ptr += len;
 
@@ -69,13 +69,13 @@ Bnode* TorrentFile::parse_string(char* &ptr) {
 Bnode* TorrentFile::parse_list(char* &ptr) {
     Bnode* node = new Bnode(LIST);
     node->raw_start = ptr;
-    ++ptr; // skip 'l'
+    ++ptr; 
 
     while (*ptr != 'e') {
         node->list_val.push_back(parse_element(ptr));
     }
 
-    ++ptr; // skip 'e'
+    ++ptr; 
     node->raw_end = ptr;
     return node;
 }
@@ -83,7 +83,7 @@ Bnode* TorrentFile::parse_list(char* &ptr) {
 Bnode* TorrentFile::parse_dictionary(char* &ptr) {
     Bnode* node = new Bnode(DICTIONARY);
     node->raw_start = ptr;
-    ++ptr; // skip 'd'
+    ++ptr; 
 
     while (*ptr != 'e') {
         Bnode* key_node = parse_string(ptr);
@@ -93,7 +93,7 @@ Bnode* TorrentFile::parse_dictionary(char* &ptr) {
         node->dict_val.push_back({key, parse_element(ptr)});
     }
 
-    ++ptr; // skip 'e'
+    ++ptr; 
     node->raw_end = ptr;
     return node;
 }
@@ -112,7 +112,7 @@ void TorrentFile::calculateInfoHash() {
         checksum.add(infoNode->raw_start, infoNode->raw_end - infoNode->raw_start);
         checksum.finalize();
 
-        // 1. Estrazione dei 20 byte binari (Big-Endian)
+        
         uint8_t raw[20];
         for (int i = 0; i < 5; i++) {
 
@@ -256,7 +256,7 @@ long long TorrentFile::getPieceLength() const {
 
     Bnode* infoNode = nullptr;
 
-    // 1. Cerco il nodo "info" nel root
+    
     for(const auto& pair : root->dict_val){
         if(pair.first == "info"){
             infoNode = pair.second;
@@ -266,11 +266,11 @@ long long TorrentFile::getPieceLength() const {
 
     if (!infoNode) return 0;
 
-    // 2. Cerco la chiave "piece length" all'interno del nodo info
+
     for (const auto& pair : infoNode->dict_val){
 
         if (pair.first == "piece length"){
-            // Ritorna il valore intero associato
+
             return pair.second->int_val;
         }
 
@@ -292,14 +292,14 @@ std::vector<FileInfo> TorrentFile::getFilesList() const {
     std::string rootName = "";
     for (const auto& p : infoNode->dict_val) if (p.first == "name") rootName = p.second->str_val;
 
-    // Caso File Singolo
+    
     for (const auto& p : infoNode->dict_val) {
         if (p.first == "length") {
             files.push_back({rootName, p.second->int_val});
             return files;
         }
     }
-    // Caso Multi-File
+    
     for (const auto& p : infoNode->dict_val) {
         if (p.first == "files") {
             for (Bnode* fileDict : p.second->list_val) {

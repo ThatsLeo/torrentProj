@@ -23,7 +23,6 @@ public:
 
     TrackerClient(const std::string& announceUrl);
     
-    // Esegue la richiesta e restituisce la lista dei peer
     std::vector<Peer> announce(const std::string& infoHash, const std::string& peerId, long long left, int listenPort, long long totalUploaded, long long totalDownloaded);
 
 private:

@@ -6,16 +6,15 @@
 #include <iomanip>
 #include <filesystem>
 
-// Costruttore aggiornato con inizializzazione di piece_length e total_size
 PieceManager::PieceManager(size_t numPieces, uint32_t pLen, long long totalSize) 
     : global_bitfield((numPieces + 7) / 8, 0), 
       piece_length(pLen), 
       total_size(totalSize) 
 {
-    // Il mutex viene inizializzato automaticamente
+    
 }
 
-// Helper privato per contare i bit a 1 (Algoritmo di Brian Kernighan)
+
 int PieceManager::countSetBits(uint8_t n) const {
     int count = 0;
     while (n > 0) {
@@ -25,7 +24,6 @@ int PieceManager::countSetBits(uint8_t n) const {
     return count;
 }
 
-// Restituisce il totale dei byte scaricati basandosi sui pezzi completati
 long long PieceManager::getDownloadedBytes() const {
     std::shared_lock<std::shared_mutex> lock(rw_mutex);
     long long completedPieces = 0;
@@ -36,14 +34,11 @@ long long PieceManager::getDownloadedBytes() const {
 
     long long downloaded = completedPieces * piece_length;
 
-    // Protezione: non restituire mai più della dimensione totale del file
-    // (L'ultimo pezzo potrebbe essere più corto della piece_length standard)
     return std::min(downloaded, total_size);
 }
 
-// Restituisce i byte mancanti alla fine del download
 long long PieceManager::getLeftBytes() const {
-    // getDownloadedBytes gestisce internamente il lock, quindi qui non serve
+    
     long long downloaded = getDownloadedBytes();
     
     if (downloaded >= total_size) return 0;
@@ -54,7 +49,6 @@ bool PieceManager::isPieceNeeded(int byteIndex, uint8_t peerByte) const {
     std::shared_lock<std::shared_mutex> lock(rw_mutex);
     if (byteIndex >= (int)global_bitfield.size()) return false;
     
-    // Ritorna true se il peer ha almeno un bit a 1 che noi abbiamo a 0
     return (peerByte & ~global_bitfield[byteIndex]) != 0;
 }
 
@@ -73,7 +67,6 @@ void PieceManager::_markAsComplete(int pieceIndex) {
 int PieceManager::pickPiece(const std::vector<uint8_t>& peer_bf) {
     std::shared_lock<std::shared_mutex> lock(rw_mutex);
 
-    // Scorriamo i bitfield per trovare pezzi mancanti posseduti dal peer
     for (size_t i = 0; i < global_bitfield.size() && i < peer_bf.size(); ++i) {
         uint8_t needed = peer_bf[i] & ~global_bitfield[i];
 
@@ -85,49 +78,63 @@ int PieceManager::pickPiece(const std::vector<uint8_t>& peer_bf) {
             }
         }
     }
-    return -1; // Nessun pezzo utile trovato
+    return -1; 
 }
 
-// Getter per il riferimento al bitfield
 std::vector<uint8_t>& PieceManager::getBitfield() { 
     return global_bitfield; 
 }
 
-// Getter per il riferimento al mutex
 std::shared_mutex& PieceManager::getMutex() { 
     return rw_mutex; 
 }
 
+
 bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* blockData, size_t blockSize) {
     std::unique_lock<std::shared_mutex> lock(rw_mutex); 
 
-    // 1. Controllo bitfield (già corretto nel tuo codice)
     size_t byteIdx = index / 8;
     if (byteIdx < global_bitfield.size()) {
         if (global_bitfield[byteIdx] & (1 << (7 - (index % 8)))) return false; 
     }
 
-    // 2. Inizializzazione buffer (già corretto)
+
     if (in_progress.find(index) == in_progress.end()) {
         uint32_t current_p_len = piece_length;
         long long numPieces = (total_size + piece_length - 1) / piece_length;
-        if (index == numPieces - 1) {
-            current_p_len = total_size - (index * (long long)piece_length);
-        }
-        in_progress[index].buffer.resize(current_p_len);
-        in_progress[index].bytes_received = 0;
-    }
-
-    // 3. Copia dati
-    PieceProgress& p = in_progress[index];
-    if (begin + blockSize <= p.buffer.size()) {
-        std::copy(blockData, blockData + blockSize, p.buffer.begin() + begin);
-        p.bytes_received += blockSize;
         
-        total_transferred += blockSize; 
+
+        if (index == (uint32_t)(numPieces - 1)) {
+            current_p_len = static_cast<uint32_t>(total_size - (index * (long long)piece_length));
+        }
+        
+        PieceProgress& new_p = in_progress[index];
+        new_p.buffer.resize(current_p_len);
+        new_p.bytes_received = 0;
+        
+
+        uint32_t num_blocks = (current_p_len + 16383) / 16384;
+        new_p.blocks_received.assign(num_blocks, false);
     }
 
-    // 4. Verifica Hash
+    PieceProgress& p = in_progress[index];
+    uint32_t blockIndex = begin / 16384;
+
+
+    if (blockIndex < p.blocks_received.size() && !p.blocks_received[blockIndex]) {
+        if (begin + blockSize <= p.buffer.size()) {
+            std::copy(blockData, blockData + blockSize, p.buffer.begin() + begin);
+            p.blocks_received[blockIndex] = true;
+            p.bytes_received += blockSize;
+            
+
+            total_transferred += blockSize; 
+        }
+    } else {
+        return false; 
+    }
+
+
     if (p.bytes_received >= p.buffer.size()) {
         sha1 hasher;
         hasher.add(p.buffer.data(), p.buffer.size());
@@ -142,31 +149,27 @@ bool PieceManager::addBlock(uint32_t index, uint32_t begin, const uint8_t* block
         std::string expected_hex = ss.str();
 
         if (std::string(calculated_hex) == expected_hex) {
-            //std::cout << "[OK] Pezzo #" << index << " verificato." << std::endl;
-            
+
             std::vector<uint8_t> completedData = std::move(p.buffer);
             in_progress.erase(index);
 
             lock.unlock();
 
             saveToDisk(index, completedData);
-
-            std::unique_lock<std::shared_mutex> finalLock(rw_mutex);
             
-            _markAsComplete(index);
-
+            std::unique_lock<std::shared_mutex> finalLock(rw_mutex);
+            global_bitfield[index / 8] |= (1 << (7 - (index % 8)));
             return true;
+        } else {
 
-        }
-        
-        else {
-            std::cout << "[FAIL] Pezzo #" << index << " corrotto! Hash errato." << std::endl;
+            std::cout << "[FAIL] Pezzo #" << index << " corrotto! Hash errato. Resetting..." << std::endl;
             in_progress.erase(index);
             return false;
         }
     }
     return false;
 }
+
 
 void PieceManager::saveToDisk(uint32_t index, const std::vector<uint8_t>& data) {
     long long pieceGlobalOffset = (long long)index * piece_length;

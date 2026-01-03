@@ -23,15 +23,15 @@ public:
     std::vector<FileInfo> filesList;
     std::atomic<long long> total_transferred{0}; 
 
-    // Costruttore
+    
     PieceManager(size_t numPieces, uint32_t pLen, long long totalSize);
 
     bool isPieceNeeded(int byteIndex, uint8_t peerByte) const;
 
-    // Segna un pezzo come completato nel bitfield globale
+    
     void markAsComplete(int pieceIndex);
 
-    // Strategia per scegliere quale pezzo chiedere a un peer
+
     int pickPiece(const std::vector<uint8_t>& peer_bf);
     
     long long getDownloadedBytes() const;
@@ -46,7 +46,7 @@ public:
     void saveToDisk(uint32_t index, const std::vector<uint8_t>& data);
     void setFilesList(const std::vector<FileInfo>& files) { this->filesList = files; }
 
-    // Getter
+
     std::vector<uint8_t>& getBitfield();
     std::shared_mutex& getMutex();
     long long getTotalTransferred() const { return total_transferred.load(); }
@@ -57,12 +57,13 @@ private:
     void _markAsComplete(int pieceIndex);
 
     struct PieceProgress {
-        std::vector<uint8_t> buffer;
-        size_t bytes_received = 0;
+    std::vector<uint8_t> buffer;
+    std::vector<bool> blocks_received; 
+    size_t bytes_received = 0;
     };
 
-    std::map<uint32_t, PieceProgress> in_progress; // Pezzi in fase di scaricamento
-    std::string pieces_hashes; // La stringa binaria degli hash dal file .torrent
+    std::map<uint32_t, PieceProgress> in_progress; 
+    std::string pieces_hashes; 
 };
 
 #endif
